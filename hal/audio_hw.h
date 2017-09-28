@@ -170,6 +170,15 @@ enum {
     USECASE_AUDIO_PLAYBACK_EXT_DISP_SILENCE,
 
     USECASE_AUDIO_TRANSCODE_LOOPBACK,
+
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM1,
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM2,
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM3,
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM4,
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM5,
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM6,
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM7,
+    USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM8,
     AUDIO_USECASE_MAX
 };
 
@@ -311,6 +320,8 @@ struct stream_out {
 
     char pm_qos_mixer_path[MAX_MIXER_PATH_LEN];
     int dynamic_pm_qos_enabled;
+    mix_matrix_params_t pan_scale_params;
+    mix_matrix_params_t downmix_params;
 };
 
 struct stream_in {
@@ -482,6 +493,7 @@ struct audio_device {
     qahwi_device_t qahwi_dev;
     bool vr_audio_mode_enabled;
     struct audio_device_config_param *device_cfg_params;
+    unsigned int interactive_usecase_state;
 };
 
 int select_devices(struct audio_device *adev,
@@ -523,6 +535,8 @@ int adev_open_output_stream(struct audio_hw_device *dev,
                             const char *address __unused);
 void adev_close_output_stream(struct audio_hw_device *dev __unused,
                               struct audio_stream_out *stream);
+
+bool is_interactive_usecase(audio_usecase_t uc_id);
 
 #define LITERAL_TO_STRING(x) #x
 #define CHECK(condition) LOG_ALWAYS_FATAL_IF(!(condition), "%s",\

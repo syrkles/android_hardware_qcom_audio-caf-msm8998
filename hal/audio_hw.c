@@ -84,6 +84,10 @@
 #include <log_utils.h>
 #endif
 
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+#include "ultrasound.h"
+#endif
+
 #define COMPRESS_OFFLOAD_NUM_FRAGMENTS 4
 /*DIRECT PCM has same buffer sizes as DEEP Buffer*/
 #define DIRECT_PCM_NUM_FRAGMENTS 2
@@ -330,7 +334,10 @@ const char * const use_case_table[AUDIO_USECASE_MAX] = {
     [USECASE_AUDIO_PLAYBACK_AFE_PROXY] = "afe-proxy-playback",
     [USECASE_AUDIO_RECORD_AFE_PROXY] = "afe-proxy-record",
     [USECASE_AUDIO_PLAYBACK_EXT_DISP_SILENCE] = "silence-playback",
-
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+    [USECASE_AUDIO_ULTRASOUND_RX] = "ultrasound-rx",
+    [USECASE_AUDIO_ULTRASOUND_TX] = "ultrasound-tx",
+#endif
     /* Transcode loopback cases */
     [USECASE_AUDIO_TRANSCODE_LOOPBACK] = "audio-transcode-loopback",
 
@@ -838,6 +845,10 @@ int enable_audio_route(struct audio_device *adev,
     audio_extn_sound_trigger_update_stream_status(usecase, ST_EVENT_STREAM_BUSY);
     audio_extn_listen_update_stream_status(usecase, LISTEN_EVENT_STREAM_BUSY);
     audio_extn_utils_send_app_type_cfg(adev, usecase);
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+    if (usecase->id != USECASE_AUDIO_ULTRASOUND_RX &&
+        usecase->id != USECASE_AUDIO_ULTRASOUND_TX)
+#endif
     audio_extn_utils_send_audio_calibration(adev, usecase);
     if ((usecase->type == PCM_PLAYBACK) && is_offload_usecase(usecase->id)) {
         out = usecase->stream.out;
@@ -1165,6 +1176,9 @@ static void check_usecases_codec_backend(struct audio_device *adev,
     snd_device_t derive_snd_device[AUDIO_USECASE_MAX];
     int i, num_uc_to_switch = 0;
     int status = 0;
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+    bool match = 0;
+#endif
     bool force_restart_session = false;
     /*
      * This function is to make sure that all the usecases that are active on
@@ -1204,7 +1218,7 @@ static void check_usecases_codec_backend(struct audio_device *adev,
 
     list_for_each(node, &adev->usecase_list) {
         usecase = node_to_item(node, struct audio_usecase, list);
-
+#ifndef ELLIPTIC_ULTRASOUND_ENABLED
         ALOGD("%s:becf: (%d) check_usecases curr device: %s, usecase device:%s "
             "backends match %d",__func__, i,
               platform_get_snd_device_name(snd_device),
@@ -1231,6 +1245,36 @@ static void check_usecases_codec_backend(struct audio_device *adev,
                 num_uc_to_switch++;
             }
         }
+#else
+        match = platform_check_backends_match(snd_device, usecase->out_snd_device);
+
+        ALOGD("%s:becf: (%d) check_usecases curr device: %s, usecase device:%s "
+            "backends match %d",__func__, i,
+              platform_get_snd_device_name(snd_device),
+              platform_get_snd_device_name(usecase->out_snd_device),
+              match);
+        if (match && (usecase->type != PCM_CAPTURE) && (usecase != uc_info)) {
+            uc_derive_snd_device = derive_playback_snd_device(adev->platform,
+                                               usecase, uc_info, snd_device);
+            if (((uc_derive_snd_device != usecase->out_snd_device) || force_routing) &&
+                ((usecase->devices & AUDIO_DEVICE_OUT_ALL_CODEC_BACKEND) ||
+                (usecase->devices & AUDIO_DEVICE_OUT_AUX_DIGITAL) ||
+                (usecase->devices & AUDIO_DEVICE_OUT_USB_DEVICE) ||
+                (usecase->devices & AUDIO_DEVICE_OUT_ALL_A2DP) ||
+                (usecase->devices & AUDIO_DEVICE_OUT_ALL_SCO)) &&
+                ((force_restart_session) ||
+                (platform_check_backends_match(snd_device, usecase->out_snd_device)))) {
+                ALOGD("%s:becf: check_usecases (%s) is active on (%s) - disabling ..",
+                    __func__, use_case_table[usecase->id],
+                      platform_get_snd_device_name(usecase->out_snd_device));
+                disable_audio_route(adev, usecase);
+                switch_device[usecase->id] = true;
+                /* Enable existing usecase on derived playback device */
+                derive_snd_device[usecase->id] = uc_derive_snd_device;
+                num_uc_to_switch++;
+            }
+        }
+#endif
     }
 
     ALOGD("%s:becf: check_usecases num.of Usecases to switch %d", __func__,
@@ -3019,6 +3063,9 @@ static int out_standby(struct audio_stream *stream)
         list_for_each(node, &adev->usecase_list) {
             uc_info = node_to_item(node, struct audio_usecase, list);
             if ((uc_info->type == PCM_PLAYBACK) &&
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+                (uc_info->stream.out != NULL) &&
+#endif
                 (uc_info->out_snd_device != platform_get_output_snd_device(adev->platform, uc_info->stream.out)))
                 select_devices(adev, uc_info->id);
         }
@@ -5818,6 +5865,29 @@ static int adev_set_parameters(struct audio_hw_device *dev, const char *kvpairs)
             ALOGI("wrong vr mode set");
         }
     }
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+    char *result = str_parms_to_str(parms);
+    ALOGI("Params: %s", result);
+    ret = str_parms_get_int(parms, "ultrasound-sensor", &val);
+    ALOGI("Ultrasound enable: %d. val: %d", ret, val);
+    if (ret >= 0) {
+        if (val == 1) {
+            us_start();
+        } else {
+            us_stop();
+        }
+    }
+
+    ret = str_parms_get_int(parms, "ultrasound_set_manual_calibration", &val);
+    if (ret >= 0) {
+        us_set_manual_cal(val);
+    }
+
+    ret = str_parms_get_int(parms, "ultrasound_set_sensitivity", &val);
+    if (ret >= 0) {
+        us_set_sensitivity(val);
+    }
+#endif
 
     audio_extn_set_parameters(adev, parms);
 done:
@@ -6439,6 +6509,9 @@ static int adev_close(hw_device_t *device)
         free(device);
         adev = NULL;
     }
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+    us_deinit();
+#endif
     pthread_mutex_unlock(&adev_init_lock);
 
     return 0;
@@ -6758,6 +6831,9 @@ static int adev_open(const hw_module_t *module, const char *name,
     adev->vr_audio_mode_enabled = false;
 
     audio_extn_ds2_enable(adev);
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+    us_init(adev);
+#endif
     *device = &adev->device.common;
 
     audio_extn_utils_update_streams_cfg_lists(adev->platform, adev->mixer,

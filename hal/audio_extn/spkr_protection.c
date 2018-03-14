@@ -1178,7 +1178,7 @@ int audio_extn_fbsp_set_parameters(struct str_parms *parms)
         goto done;
     }
     if (!handle.spkr_prot_enable) {
-        ALOGD("%s: Speaker protection disabled", __func__);
+        ALOGV("%s: Speaker protection disabled", __func__);
         goto done;
     }
 
@@ -1249,7 +1249,7 @@ int audio_extn_fbsp_get_parameters(struct str_parms *query,
     char value[MAX_STR_SIZE] = {0};
 
     if (!handle.spkr_prot_enable) {
-        ALOGD("%s: Speaker protection disabled", __func__);
+        ALOGV("%s: Speaker protection disabled", __func__);
         return -EINVAL;
     }
 

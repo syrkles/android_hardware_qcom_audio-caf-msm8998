@@ -27,10 +27,6 @@
 
 #define ULTRASOUND_CALIBRATION_FILE "/persist/audio/us_cal"
 #define ULTRASOUND_CALIBRATION_MIXER "Ultrasound Calibration Data"
-#define ULTRASOUND_MANUAL_CALIBRATION_FILE "/persist/audio/us_manual_cal"
-#define ULTRASOUND_MANUAL_CALIBRATION_MIXER "Ultrasound Calibration Profile"
-#define ULTRASOUND_MANUAL_CALIBRATION_BASE 84
-#define ULTRASOUND_SENSITIVITY_MIXER "Ultrasound Gain"
 
 enum {
     ULTRASOUND_STATUS_DEFAULT,
@@ -86,24 +82,6 @@ void us_cal_load(void)
         ALOGE("%s: Could not set ctl, error:%d ", __func__, rc);
 }
 
-void us_manual_cal_load(void)
-{
-    FILE *f;
-    char buff[5] = {0};
-
-    f = fopen(ULTRASOUND_MANUAL_CALIBRATION_FILE, "r");
-    if (!f) {
-        ALOGE("%s: Cannot open calibration file: %s",
-                __func__, ULTRASOUND_MANUAL_CALIBRATION_FILE);
-        return;
-    }
-
-    fread(buff, 1, sizeof(buff), f);
-    fclose(f);
-
-    us_set_manual_cal(ULTRASOUND_MANUAL_CALIBRATION_BASE + strtol(buff, 0, 0));
-}
-
 int us_init(struct audio_device *adev)
 {
     ALOGD("%s: enter", __func__);
@@ -122,7 +100,6 @@ int us_init(struct audio_device *adev)
     us->adev = adev;
 
     us_cal_load();
-    us_manual_cal_load();
 
     ALOGD("%s: exit, status(0)", __func__);
 
@@ -222,7 +199,7 @@ int us_start(void)
 
     enable_snd_device(us->adev, SND_DEVICE_OUT_ULTRASOUND_HANDSET);
     enable_audio_route(us->adev, rx_usecase);
-    ALOGI("%s: Opening PCM playback device card_id(%d) device_id(%d)",
+    ALOGV("%s: Opening PCM playback device card_id(%d) device_id(%d)",
             __func__, us->adev->snd_card, rx_device_id);
     us->rx_pcm = pcm_open(us->adev->snd_card, rx_device_id, PCM_OUT, &pcm_config_us);
     if (us->rx_pcm && !pcm_is_ready(us->rx_pcm)) {
@@ -245,7 +222,7 @@ int us_start(void)
 
     enable_snd_device(us->adev, SND_DEVICE_IN_ULTRASOUND_MIC);
     enable_audio_route(us->adev, tx_usecase);
-    ALOGI("%s: Opening PCM capture device card_id(%d) device_id(%d)",
+    ALOGV("%s: Opening PCM capture device card_id(%d) device_id(%d)",
             __func__, us->adev->snd_card, tx_device_id);
     us->tx_pcm = pcm_open(us->adev->snd_card, tx_device_id, PCM_IN, &pcm_config_us);
     if (us->tx_pcm && !pcm_is_ready(us->tx_pcm)) {
@@ -274,44 +251,4 @@ int us_stop(void)
     stop_us();
 
     return 0;
-}
-
-int us_set_manual_cal(int value)
-{
-    struct mixer_ctl *ctl;
-    int rc;
-
-    ALOGD("%s: value = %d", __func__, value);
-    ctl = mixer_get_ctl_by_name(us->adev->mixer, ULTRASOUND_MANUAL_CALIBRATION_MIXER);
-    if (!ctl) {
-        ALOGE("%s: Could not get ctl for mixer cmd - %s",
-                __func__, ULTRASOUND_MANUAL_CALIBRATION_MIXER);
-        return -EINVAL;
-    }
-
-    rc = mixer_ctl_set_value(ctl, 0, value);
-    if (rc < 0)
-        ALOGE("%s: Could not set ctl, error:%d ", __func__, rc);
-
-    return rc;
-}
-
-int us_set_sensitivity(int value)
-{
-    struct mixer_ctl *ctl;
-    int rc;
-
-    ALOGD("%s: value = %d", __func__, value);
-    ctl = mixer_get_ctl_by_name(us->adev->mixer, ULTRASOUND_SENSITIVITY_MIXER);
-    if (!ctl) {
-        ALOGE("%s: Could not get ctl for mixer cmd - %s",
-                __func__, ULTRASOUND_SENSITIVITY_MIXER);
-        return -EINVAL;
-    }
-
-    rc = mixer_ctl_set_value(ctl, 0, value);
-    if (rc < 0)
-        ALOGE("%s: Could not set ctl, error:%d ", __func__, rc);
-
-    return rc;
 }

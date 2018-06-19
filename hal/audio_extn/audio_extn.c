@@ -43,8 +43,9 @@
 #include <errno.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <cutils/properties.h>
-#include <cutils/log.h>
+#include <log/log.h>
 
 #include "audio_hw.h"
 #include "audio_extn.h"
@@ -446,7 +447,7 @@ bool audio_extn_can_use_ras(void)
 #else
 bool audio_extn_get_anc_enabled(void)
 {
-    ALOGV("%s: anc_enabled:%d", __func__, aextnmod.anc_enabled);
+    ALOGD("%s: anc_enabled:%d", __func__, aextnmod.anc_enabled);
     return (aextnmod.anc_enabled ? true: false);
 }
 
@@ -868,7 +869,7 @@ void audio_extn_get_parameters(const struct audio_device *adev,
         adev->offload_effects_get_parameters(query, reply);
 
     kv_pairs = str_parms_to_str(reply);
-    ALOGV_IF(kv_pairs != NULL, "%s: returns %s", __func__, kv_pairs);
+    ALOGD_IF(kv_pairs != NULL, "%s: returns %s", __func__, kv_pairs);
     free(kv_pairs);
 }
 

@@ -33,7 +33,7 @@
 
 #include <errno.h>
 #include <math.h>
-#include <cutils/log.h>
+#include <log/log.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include "audio_hw.h"
@@ -46,6 +46,8 @@
 #include <cutils/properties.h>
 #include "audio_extn.h"
 #include <linux/msm_audio_calibration.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #ifdef DYNAMIC_LOG_ENABLED
 #include <log_xml_parser.h>
@@ -1178,7 +1180,7 @@ int audio_extn_fbsp_set_parameters(struct str_parms *parms)
         goto done;
     }
     if (!handle.spkr_prot_enable) {
-        ALOGV("%s: Speaker protection disabled", __func__);
+        ALOGD("%s: Speaker protection disabled", __func__);
         goto done;
     }
 
@@ -1249,7 +1251,7 @@ int audio_extn_fbsp_get_parameters(struct str_parms *query,
     char value[MAX_STR_SIZE] = {0};
 
     if (!handle.spkr_prot_enable) {
-        ALOGV("%s: Speaker protection disabled", __func__);
+        ALOGD("%s: Speaker protection disabled", __func__);
         return -EINVAL;
     }
 

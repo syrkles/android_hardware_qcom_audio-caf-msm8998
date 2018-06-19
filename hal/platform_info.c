@@ -406,7 +406,6 @@ done:
     return;
 }
 
-
 static void process_device_name(const XML_Char **attr)
 {
     int index;
@@ -476,7 +475,7 @@ static void start_tag(void *userdata __unused, const XML_Char *tag_name,
         } else if (strcmp(tag_name, "device") == 0) {
             if ((section != ACDB) && (section != BACKEND_NAME) && (section != BITWIDTH) &&
                 (section != INTERFACE_NAME) && (section != DEVICE_NAME)) {
-                ALOGE("device tag only supported for acdb/backend names/bitwitdh/interface/device names");
+                ALOGE("device tag only supported for acdb/backend names/bitwidth/interface/device names");
                 return;
             }
 

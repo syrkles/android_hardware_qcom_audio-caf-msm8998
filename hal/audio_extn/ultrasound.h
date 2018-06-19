@@ -23,15 +23,11 @@
 #define us_deinit() (0)
 #define us_start() (0)
 #define us_stop() (0)
-#define us_set_manual_cal(value) (0)
-#define us_set_sensitivity(value) (0)
 #else
 int us_init(struct audio_device *adev);
 void us_deinit(void);
 int us_start(void);
 int us_stop(void);
-int us_set_manual_cal(int value);
-int us_set_sensitivity(int value);
 #endif
 
 #endif

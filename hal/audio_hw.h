@@ -40,6 +40,7 @@
 
 #include <stdlib.h>
 #include <cutils/list.h>
+#include <hardware/audio_amplifier.h>
 #include <hardware/audio.h>
 #include <tinyalsa/asoundlib.h>
 #include <tinycompress/tinycompress.h>
@@ -168,10 +169,7 @@ enum {
 
     USECASE_AUDIO_PLAYBACK_AFE_PROXY,
     USECASE_AUDIO_RECORD_AFE_PROXY,
-#ifdef ELLIPTIC_ULTRASOUND_ENABLED
-    USECASE_AUDIO_ULTRASOUND_RX,
-    USECASE_AUDIO_ULTRASOUND_TX,
-#endif
+
     USECASE_AUDIO_PLAYBACK_EXT_DISP_SILENCE,
 
     USECASE_AUDIO_TRANSCODE_LOOPBACK,
@@ -184,6 +182,10 @@ enum {
     USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM6,
     USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM7,
     USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM8,
+
+    USECASE_AUDIO_ULTRASOUND_RX,
+    USECASE_AUDIO_ULTRASOUND_TX,
+
     AUDIO_USECASE_MAX
 };
 
@@ -506,6 +508,7 @@ struct audio_device {
     bool bt_sco_on;
     struct audio_device_config_param *device_cfg_params;
     unsigned int interactive_usecase_state;
+    amplifier_device_t *amp;
 };
 
 int select_devices(struct audio_device *adev,

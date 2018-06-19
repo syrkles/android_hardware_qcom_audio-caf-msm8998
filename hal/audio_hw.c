@@ -74,6 +74,8 @@
 #include <platform.h>
 #include "audio_extn.h"
 #include "voice_extn.h"
+#include "audio_amplifier.h"
+#include "ultrasound.h"
 
 #include "sound/compress_params.h"
 #include "sound/asound.h"
@@ -82,10 +84,6 @@
 #include <log_xml_parser.h>
 #define LOG_MASK HAL_MOD_FILE_AUDIO_HW
 #include <log_utils.h>
-#endif
-
-#ifdef ELLIPTIC_ULTRASOUND_ENABLED
-#include "ultrasound.h"
 #endif
 
 #define COMPRESS_OFFLOAD_NUM_FRAGMENTS 4
@@ -334,10 +332,7 @@ const char * const use_case_table[AUDIO_USECASE_MAX] = {
     [USECASE_AUDIO_PLAYBACK_AFE_PROXY] = "afe-proxy-playback",
     [USECASE_AUDIO_RECORD_AFE_PROXY] = "afe-proxy-record",
     [USECASE_AUDIO_PLAYBACK_EXT_DISP_SILENCE] = "silence-playback",
-#ifdef ELLIPTIC_ULTRASOUND_ENABLED
-    [USECASE_AUDIO_ULTRASOUND_RX] = "ultrasound-rx",
-    [USECASE_AUDIO_ULTRASOUND_TX] = "ultrasound-tx",
-#endif
+
     /* Transcode loopback cases */
     [USECASE_AUDIO_TRANSCODE_LOOPBACK] = "audio-transcode-loopback",
 
@@ -352,6 +347,9 @@ const char * const use_case_table[AUDIO_USECASE_MAX] = {
     [USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM6] = "audio-interactive-stream6",
     [USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM7] = "audio-interactive-stream7",
     [USECASE_AUDIO_PLAYBACK_INTERACTIVE_STREAM8] = "audio-interactive-stream8",
+    /* For Elliptic Ultrasound proximity sensor */
+    [USECASE_AUDIO_ULTRASOUND_RX] = "ultrasound-rx",
+    [USECASE_AUDIO_ULTRASOUND_TX] = "ultrasound-tx",
 };
 
 static const audio_usecase_t offload_usecases[] = {
@@ -846,8 +844,7 @@ int enable_audio_route(struct audio_device *adev,
     audio_extn_listen_update_stream_status(usecase, LISTEN_EVENT_STREAM_BUSY);
     audio_extn_utils_send_app_type_cfg(adev, usecase);
 #ifdef ELLIPTIC_ULTRASOUND_ENABLED
-    if (usecase->id != USECASE_AUDIO_ULTRASOUND_RX &&
-        usecase->id != USECASE_AUDIO_ULTRASOUND_TX)
+    if (usecase->id != USECASE_AUDIO_ULTRASOUND_TX)
 #endif
     audio_extn_utils_send_audio_calibration(adev, usecase);
     if ((usecase->type == PCM_PLAYBACK) && is_offload_usecase(usecase->id)) {
@@ -952,6 +949,10 @@ int enable_snd_device(struct audio_device *adev,
                                         ST_EVENT_SND_DEVICE_BUSY);
         audio_extn_listen_update_device_status(snd_device,
                                         LISTEN_EVENT_SND_DEVICE_BUSY);
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+        if (snd_device != SND_DEVICE_OUT_ULTRASOUND_HANDSET &&
+            snd_device != SND_DEVICE_IN_ULTRASOUND_MIC)
+#endif
         if (platform_get_snd_device_acdb_id(snd_device) < 0) {
             adev->snd_dev_ref_cnt[snd_device]--;
             audio_extn_sound_trigger_update_device_status(snd_device,
@@ -961,6 +962,7 @@ int enable_snd_device(struct audio_device *adev,
             return -EINVAL;
         }
         audio_extn_dev_arbi_acquire(snd_device);
+        amplifier_enable_devices(snd_device, true);
         audio_route_apply_and_update_path(adev->audio_route, device_name);
 
         if (SND_DEVICE_OUT_HEADPHONES == snd_device &&
@@ -1015,6 +1017,7 @@ int disable_snd_device(struct audio_device *adev,
             }
         } else {
             audio_route_reset_and_update_path(adev->audio_route, device_name);
+            amplifier_enable_devices(snd_device, false);
         }
 
         if (SND_DEVICE_OUT_BT_A2DP == snd_device)
@@ -1176,9 +1179,6 @@ static void check_usecases_codec_backend(struct audio_device *adev,
     snd_device_t derive_snd_device[AUDIO_USECASE_MAX];
     int i, num_uc_to_switch = 0;
     int status = 0;
-#ifdef ELLIPTIC_ULTRASOUND_ENABLED
-    bool match = 0;
-#endif
     bool force_restart_session = false;
     /*
      * This function is to make sure that all the usecases that are active on
@@ -1218,12 +1218,18 @@ static void check_usecases_codec_backend(struct audio_device *adev,
 
     list_for_each(node, &adev->usecase_list) {
         usecase = node_to_item(node, struct audio_usecase, list);
-#ifndef ELLIPTIC_ULTRASOUND_ENABLED
+
         ALOGD("%s:becf: (%d) check_usecases curr device: %s, usecase device:%s "
             "backends match %d",__func__, i,
               platform_get_snd_device_name(snd_device),
               platform_get_snd_device_name(usecase->out_snd_device),
               platform_check_backends_match(snd_device, usecase->out_snd_device));
+
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+        if (usecase->id == USECASE_AUDIO_ULTRASOUND_RX)
+            continue;
+#endif
+
         if ((usecase->type != PCM_CAPTURE) && (usecase != uc_info)) {
             uc_derive_snd_device = derive_playback_snd_device(adev->platform,
                                                usecase, uc_info, snd_device);
@@ -1245,36 +1251,6 @@ static void check_usecases_codec_backend(struct audio_device *adev,
                 num_uc_to_switch++;
             }
         }
-#else
-        match = platform_check_backends_match(snd_device, usecase->out_snd_device);
-
-        ALOGD("%s:becf: (%d) check_usecases curr device: %s, usecase device:%s "
-            "backends match %d",__func__, i,
-              platform_get_snd_device_name(snd_device),
-              platform_get_snd_device_name(usecase->out_snd_device),
-              match);
-        if (match && (usecase->type != PCM_CAPTURE) && (usecase != uc_info)) {
-            uc_derive_snd_device = derive_playback_snd_device(adev->platform,
-                                               usecase, uc_info, snd_device);
-            if (((uc_derive_snd_device != usecase->out_snd_device) || force_routing) &&
-                ((usecase->devices & AUDIO_DEVICE_OUT_ALL_CODEC_BACKEND) ||
-                (usecase->devices & AUDIO_DEVICE_OUT_AUX_DIGITAL) ||
-                (usecase->devices & AUDIO_DEVICE_OUT_USB_DEVICE) ||
-                (usecase->devices & AUDIO_DEVICE_OUT_ALL_A2DP) ||
-                (usecase->devices & AUDIO_DEVICE_OUT_ALL_SCO)) &&
-                ((force_restart_session) ||
-                (platform_check_backends_match(snd_device, usecase->out_snd_device)))) {
-                ALOGD("%s:becf: check_usecases (%s) is active on (%s) - disabling ..",
-                    __func__, use_case_table[usecase->id],
-                      platform_get_snd_device_name(usecase->out_snd_device));
-                disable_audio_route(adev, usecase);
-                switch_device[usecase->id] = true;
-                /* Enable existing usecase on derived playback device */
-                derive_snd_device[usecase->id] = uc_derive_snd_device;
-                num_uc_to_switch++;
-            }
-        }
-#endif
     }
 
     ALOGD("%s:becf: check_usecases num.of Usecases to switch %d", __func__,
@@ -1362,6 +1338,12 @@ static void check_usecases_capture_codec_backend(struct audio_device *adev,
         /*
          * TODO: Enhance below condition to handle BT sco/USB multi recording
          */
+
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+        if (usecase->id == USECASE_AUDIO_ULTRASOUND_TX)
+            continue;
+#endif
+
         if (usecase->type != PCM_PLAYBACK &&
                 usecase != uc_info &&
                 (usecase->in_snd_device != snd_device || force_routing) &&
@@ -2070,6 +2052,10 @@ int select_devices(struct audio_device *adev, audio_usecase_t uc_id)
             voice_extn_compress_voip_is_started(adev))
             voice_set_sidetone(adev, out_snd_device, true);
     }
+
+    /* Rely on amplifier_set_devices to distinguish between in/out devices */
+    amplifier_set_input_devices(in_snd_device);
+    amplifier_set_output_devices(out_snd_device);
 
     /* Applicable only on the targets that has external modem.
      * Enable device command should be sent to modem only after
@@ -3126,6 +3112,9 @@ static int out_standby(struct audio_stream *stream)
             stop_compressed_output_l(out);
 
         pthread_mutex_lock(&adev->lock);
+
+        amplifier_output_stream_standby((struct audio_stream_out *) stream);
+
         out->standby = true;
         if (out->usecase == USECASE_COMPRESS_VOIP_CALL) {
             voice_extn_compress_voip_close_output_stream(stream);
@@ -3321,6 +3310,9 @@ static int out_set_parameters(struct audio_stream *stream, const char *kvpairs)
     parms = str_parms_create_str(kvpairs);
     if (!parms)
         goto error;
+
+    amplifier_out_set_parameters(parms);
+
     err = str_parms_get_str(parms, AUDIO_PARAMETER_STREAM_ROUTING, value, sizeof(value));
     if (err >= 0) {
         val = atoi(value);
@@ -3951,6 +3943,11 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
             ret = voice_extn_compress_voip_start_output_stream(out);
         else
             ret = start_output_stream(out);
+
+        if (ret == 0)
+            amplifier_output_stream_start(stream,
+                    is_offload_usecase(out->usecase));
+
         pthread_mutex_unlock(&adev->lock);
         /* ToDo: If use case is compress offload should return 0 */
         if (ret != 0) {
@@ -4193,7 +4190,7 @@ static int out_get_render_position(const struct audio_stream_out *stream,
         *dsp_frames = out->written;
         return 0;
     } else
-        return -ENODATA;
+        return -EINVAL;
 }
 
 static int out_add_audio_effect(const struct audio_stream *stream __unused,
@@ -4666,6 +4663,9 @@ static int in_standby(struct audio_stream *stream)
             adev->adm_deregister_stream(adev->adm_data, in->capture_handle);
 
         pthread_mutex_lock(&adev->lock);
+
+        amplifier_input_stream_standby((struct audio_stream_in *) stream);
+
         in->standby = true;
         if (in->usecase == USECASE_COMPRESS_VOIP_CALL) {
             do_stop = false;
@@ -4749,6 +4749,9 @@ static int in_set_parameters(struct audio_stream *stream, const char *kvpairs)
 
     if (!parms)
         goto error;
+
+    amplifier_in_set_parameters(parms);
+
     lock_input_stream(in);
     pthread_mutex_lock(&adev->lock);
 
@@ -4849,7 +4852,7 @@ static char* in_get_parameters(const struct audio_stream *stream,
 static int in_set_gain(struct audio_stream_in *stream __unused,
                        float gain __unused)
 {
-    return -ENOSYS;
+    return 0;
 }
 
 static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
@@ -4881,6 +4884,11 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
             ret = voice_extn_compress_voip_start_input_stream(in);
         else
             ret = start_input_stream(in);
+
+        if (ret == 0)
+            amplifier_input_stream_start(stream);
+
+
         pthread_mutex_unlock(&adev->lock);
         if (ret != 0) {
             goto exit;
@@ -6012,11 +6020,8 @@ static int adev_set_parameters(struct audio_hw_device *dev, const char *kvpairs)
             ALOGI("wrong vr mode set");
         }
     }
-#ifdef ELLIPTIC_ULTRASOUND_ENABLED
-    char *result = str_parms_to_str(parms);
-    ALOGI("Params: %s", result);
+
     ret = str_parms_get_int(parms, "ultrasound-sensor", &val);
-    ALOGI("Ultrasound enable: %d. val: %d", ret, val);
     if (ret >= 0) {
         if (val == 1) {
             us_start();
@@ -6025,17 +6030,7 @@ static int adev_set_parameters(struct audio_hw_device *dev, const char *kvpairs)
         }
     }
 
-    ret = str_parms_get_int(parms, "ultrasound_set_manual_calibration", &val);
-    if (ret >= 0) {
-        us_set_manual_cal(val);
-    }
-
-    ret = str_parms_get_int(parms, "ultrasound_set_sensitivity", &val);
-    if (ret >= 0) {
-        us_set_sensitivity(val);
-    }
-#endif
-
+    amplifier_set_parameters(parms);
     audio_extn_set_parameters(adev, parms);
 done:
     str_parms_destroy(parms);
@@ -6153,6 +6148,8 @@ static int adev_set_mode(struct audio_hw_device *dev, audio_mode_t mode)
     pthread_mutex_lock(&adev->lock);
     if (adev->mode != mode) {
         ALOGD("%s: mode %d\n", __func__, mode);
+        if (amplifier_set_mode(mode) != 0)
+            ALOGE("Failed setting amplifier mode");
         adev->mode = mode;
         if ((mode == AUDIO_MODE_NORMAL) && voice_is_in_call(adev)) {
             voice_stop_call(adev);
@@ -6468,6 +6465,7 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
         in->config.channels = channel_count;
         in->config.rate = config->sample_rate;
         in->sample_rate = config->sample_rate;
+#ifdef SSR_ENABLED
     } else if (!audio_extn_check_and_set_multichannel_usecase(adev,
                 in, config, &channel_mask_updated)) {
         if (channel_mask_updated == true) {
@@ -6477,6 +6475,7 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
             goto err_open;
         }
         ALOGD("%s: created surround sound session succesfully",__func__);
+#endif
     } else if (audio_extn_compr_cap_enabled() &&
             audio_extn_compr_cap_format_supported(config->format) &&
             (in->dev->mode != AUDIO_MODE_IN_COMMUNICATION)) {
@@ -6632,6 +6631,8 @@ static int adev_close(hw_device_t *device)
     pthread_mutex_lock(&adev_init_lock);
 
     if ((--audio_device_ref_count) == 0) {
+        if (amplifier_close() != 0)
+            ALOGE("Amplifier close failed");
         audio_extn_snd_mon_unregister_listener(adev);
         audio_extn_sound_trigger_deinit(adev);
         audio_extn_listen_deinit(adev);
@@ -6657,9 +6658,9 @@ static int adev_close(hw_device_t *device)
         free(device);
         adev = NULL;
     }
-#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+
     us_deinit();
-#endif
+
     pthread_mutex_unlock(&adev_init_lock);
 
     return 0;
@@ -6980,9 +6981,12 @@ static int adev_open(const hw_module_t *module, const char *name,
     adev->vr_audio_mode_enabled = false;
 
     audio_extn_ds2_enable(adev);
-#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+
+    if (amplifier_open(adev) != 0)
+        ALOGE("Amplifier initialization failed");
+
     us_init(adev);
-#endif
+
     *device = &adev->device.common;
 
     audio_extn_utils_update_streams_cfg_lists(adev->platform, adev->mixer,
